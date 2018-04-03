@@ -2,8 +2,10 @@ import discord
 import time
 import datetime
 import threading
+import random
 
 TOKEN = "NDMwNzA2NzQ4ODUzMTkwNjU2.DaUJSw.1GOfezdHzVV5ARD1DRLpniLyZZw"
+repo = r"https://github.com/Nytra/Ellis-Bot"
 
 client = discord.Client()
 
@@ -133,7 +135,7 @@ async def on_message(message):
         await client.send_message(message.channel, msg)
 
     if message.content.startswith("!source"):
-        msg = r"https://github.com/Nytra/Ellis-Bot/blob/master"
+        msg = repo
         await client.send_message(message.channel, msg)
 
     if message.content.startswith("!help"):
@@ -147,6 +149,14 @@ async def on_message(message):
         dur = int(message.content.split()[1])
         timers.append(Timer(int(time.time()) + dur, message.author, message.channel))
         msg = "Timer set for " + str(dur) + " seconds."
+        await client.send_message(message.channel, msg)
+
+    if message.content.startswith("!flip"):
+        n = random.randint(0, 1)
+        if n == 0:
+            msg = "Heads!"
+        else:
+            msg = "Tails!"
         await client.send_message(message.channel, msg)
 
 @client.event
