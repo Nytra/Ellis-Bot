@@ -1,10 +1,25 @@
 import discord
+import time
+import datetime
 
 TOKEN = "NDMwNzA2NzQ4ODUzMTkwNjU2.DaUJSw.1GOfezdHzVV5ARD1DRLpniLyZZw"
 
 client = discord.Client()
 
 debug = False
+start_time = int(time.time())
+
+class Timer:
+    def __init__(self, unix, member):
+        self.unix = unix
+        self.member = member
+
+    def get_unix(self):
+        return self.unix
+
+    def get_member(self):
+        return self.member
+
 
 def get_mentions(message):
     mentions = []
@@ -41,9 +56,12 @@ async def on_message(message):
 
     if message.content.startswith("!poke"):
         parts = message.content.split()
-        for member in client.get_all_members():
-            if len(parts) > 1 and member.mention == parts[1]:
-                msg = "*" + message.author.mention + " pokes " + member.mention + "*"
+        if len(parts) > 1:
+            for member in client.get_all_members():
+                if len(parts) > 1 and member.mention == parts[1]:
+                    msg = "*" + message.author.mention + " pokes " + member.mention + "*"
+        else:
+            msg = "Please provide a target."
 
         await client.send_message(message.channel, msg)
 
@@ -55,6 +73,26 @@ async def on_message(message):
             debug = True
             msg = "Debugging enabled."
 
+        await client.send_message(message.channel, msg)
+
+    if message.content.startswith("!time"):
+        dt = datetime.datetime.now()
+        msg = "[{}/{}/{}] [{}:{}:{}]".format(dt.day,
+                                             dt.month,
+                                             dt.year,
+                                             dt.hour,
+                                             dt.minute,
+                                             dt.second)
+        await client.send_message(message.channel, msg)
+
+    if debug and message.content.startswith("!dumpvars"):
+        msg = ""
+        for var in globals():
+            msg += str(var) + " " + str(globals()[var]) + "\n"
+        await client.send_message(message.channel, msg)
+
+    if message.content.startswith("!uptime"):
+        msg = "Ellis has been online for " + str(int(time.time()) - start_time) + " seconds."
         await client.send_message(message.channel, msg)
 
 @client.event
