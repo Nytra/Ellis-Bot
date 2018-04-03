@@ -11,18 +11,16 @@ debug = False
 start_time = int(time.time())
 timers = []
 
-help_msg = """
-!hello - Ellis will greet you.\n
-!pig - Tells you who the Fortnite Pig currently is.\n
-!poke [target] - Ellis will poke the target.\n
-!debug - Enables debugging mode.\n
-!datetime - Displays the current date and time.\n
-!dumpvars - Displays a list of all of Ellis's variables and their respective values.\n
-!uptime - Tells you how long Ellis has been online for.\n
-!source - Provides you with a link to this project's GitHub repository.\n
-!help - Displays this message.\n
-!kill - Kills the bot.
-"""
+help_msg = """!hello - Ellis will greet you.
+!pig - Tells you who the Fortnite Pig currently is.
+!poke [target] - Ellis will poke the target.
+!debug - Enables debugging mode.
+!datetime - Displays the current date and time.
+!dumpvars - Displays a list of all of Ellis's variables and their respective values.
+!uptime - Tells you how long Ellis has been online for.
+!source - Provides you with a link to this project's GitHub repository.
+!help - Displays this message.
+!kill - Kills the bot."""
 
 class Timer:
     def __init__(self, unix, member, channel):
@@ -123,9 +121,11 @@ async def on_message(message):
         await client.send_message(message.channel, msg)
 
     if debug and message.content.startswith("!dumpvars"):
+        msg = "Dumping vars..."
+        await client.send_message(message.channel, msg)
         msg = ""
         for var in globals():
-            msg += str(var) + " " + str(globals()[var]) + "\n"
+            msg += str(var) + " = " + str(globals()[var]) + "\n"
         await client.send_message(message.channel, msg)
 
     if message.content.startswith("!uptime"):
