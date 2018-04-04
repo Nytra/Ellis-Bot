@@ -143,7 +143,7 @@ async def on_message(message):
 
     if message.content.startswith("!kill"):
         await client.send_message(message.channel, "Shutting down...")
-        quit(0)
+        client.logout()
 
     if message.content.startswith("!timer"):
         dur = int(message.content.split()[1])
@@ -161,10 +161,11 @@ async def on_message(message):
 
 @client.event
 async def on_ready():
-    print("Logged in as")
-    print(client.user.name)
-    print(client.user.id)
-    print("-----")
+    print("Logged in successfully.")
+
+@client.event
+async def on_member_remove(member):
+    print(member.name, "has logged out.")
 
 t1 = threading.Thread(target=timer_thread)
 t1.start()
