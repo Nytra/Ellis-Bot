@@ -243,4 +243,10 @@ async def ticker():
 async def on_member_remove(member):
     print(member.name, "has logged out.")
 
+@client.event
+async def on_error(event, *args, **kwargs):
+    global debug
+    if debug:
+        await client.send_message(messages[-1].channel, "Error occurred in coroutine " + str(event))
+
 client.run(TOKEN)
