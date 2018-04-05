@@ -2,6 +2,8 @@ import discord
 import time
 import datetime
 import threading
+import time
+import asyncio
 import random
 
 TOKEN = "NDMwNzA2NzQ4ODUzMTkwNjU2.DaUJSw.1GOfezdHzVV5ARD1DRLpniLyZZw"
@@ -11,6 +13,7 @@ client = discord.Client()
 
 debug = False
 start_time = int(time.time())
+messages = []
 timers = []
 
 help_msg = """!hello - Ellis will greet you.
@@ -29,10 +32,11 @@ class Timer:
         self.unix = unix
         self.member = member
         self.channel = channel
-        self.done = False
 
-    def get_unix(self):
-        return self.unix
+    def is_done(self):
+        if int(time.time()) > self.unix:
+            return True
+        return False
 
     def get_member(self):
         return self.member
@@ -40,31 +44,15 @@ class Timer:
     def get_channel(self):
         return self.channel
 
-    def is_done(self):
-        return self.done
-
-    def set_done(self):
-        self.done = True
-
-def timer_thread():
-    while True:
-        for timer in timers:
-            if int(time.time()) > timer.get_unix():
-                client.send_message(timer.get_channel(), "Timer set by " + timer.get_member().mention + " has been activated.")
-                timers.remove(timer)
-
-def get_mentions(message):
-    mentions = []
-    parts = list(part.lower for part in message.split())
-    members = client.get_all_members()
-    for member in members:
-        if member.mention.lower() in parts:
-            mentions.append(member)
-    return mentions
-
 @client.event
 async def on_message(message):
     global debug
+
+    messages.append(message)
+    args = message.content.split()
+
+    if len(args) == 0:
+        return
 
     if message.author == client.user:
         return
@@ -131,7 +119,31 @@ async def on_message(message):
         await client.send_message(message.channel, msg)
 
     if message.content.startswith("!uptime"):
-        msg = "Ellis has been online for " + str(int(time.time()) - start_time) + " seconds."
+        t = int(time.time()) - start_time
+        days = 0
+        hours = 0
+        minutes = 0
+        seconds = 0
+        while t >= 3600 * 24:
+            days += 1
+            t -= 3600 * 24
+        while t >= 3600:
+            hours += 1
+            t -= 3600
+        while t >= 60:
+            minutes += 1
+            t -= 60
+        while t > 0:
+            seconds += 1
+            t -= 1
+        if days > 0:
+            msg = "Ellis has been online for {} days {} hours {} minutes {} seconds.".format(days, hours, minutes, seconds)
+        elif hours > 0:
+            msg = "Ellis has been online for {} hours {} minutes {} seconds.".format(hours, minutes, seconds)
+        elif minutes > 0:
+            msg = "Ellis has been online for {} minutes {} seconds.".format(minutes, seconds)
+        elif seconds > 0:
+            msg = "Ellis has been online for {} seconds.".format(seconds)
         await client.send_message(message.channel, msg)
 
     if message.content.startswith("!source"):
@@ -144,12 +156,6 @@ async def on_message(message):
     if message.content.startswith("!kill"):
         await client.send_message(message.channel, "Shutting down...")
         client.logout()
-
-    if message.content.startswith("!timer"):
-        dur = int(message.content.split()[1])
-        timers.append(Timer(int(time.time()) + dur, message.author, message.channel))
-        msg = "Timer set for " + str(dur) + " seconds."
-        await client.send_message(message.channel, msg)
 
     if message.content.startswith("!flip"):
         n = random.randint(0, 1)
@@ -174,25 +180,67 @@ async def on_message(message):
 
     if message.content.startswith("!hat"):
         done = False
+        n = 0
         while not done:
+            n += 1
             done = True
             m = random.choice(list(client.get_all_members()))
             for role in m.roles:
                 if role.name == "Bots":
                     done = False
-            if m.id == message.author.id:
-                done = False
+        if debug:
+            await client.send_message(message.channel, str(n) + " iterations")
         msg = m.mention
         await client.send_message(message.channel, msg)
+
+    if args[0] == "!idiot":
+        await client.send_message(message.channel, "I am an idiot.")
+
+    if args[0] == "!server":
+        msg = ""
+        for server in client.servers:
+            msg += "ID: " + server.id + "\n"
+            msg += "Name: " + server.name + "\n"
+            dt = server.created_at
+            msg += "Created: " + "[{}/{}/{}] [{}:{}:{}]".format(dt.day,
+                                                                dt.month,
+                                                                dt.year,
+                                                                dt.hour,
+                                                                dt.minute,
+                                                                dt.second) + "\n"
+            msg += "Region: " + str(server.region) + "\n"
+            msg += "Owner: " + server.owner.mention + "\n"
+            msg += "Roles: " + str(len(server.roles)) + "\n"
+            msg += "Members: " + str(len(list(member for member in server.members if not member.bot))) + "\n"
+            msg += "Bots: " + str(len(list(member for member in server.members if member.bot))) + "\n"
+            msg += "Channels: " + str(len(list(channel for channel in server.channels
+                                               if channel.type == discord.ChannelType.text
+                                               or channel.type == discord.ChannelType.voice)))
+            await client.send_message(message.channel, msg)
+
+    if args[0] == "!timer":
+        if len(args) == 2:
+            t = int(time.time()) + int(args[1])
+            timers.append(Timer(t, message.author, message.channel))
+            await client.send_message(message.channel, "Timer set.")
 
 @client.event
 async def on_ready():
     print("Logged in successfully.")
+    print("-"*10)
+    await ticker()
+
+async def ticker():
+    while True:
+        await asyncio.sleep(1)
+        if timers:
+            for t in timers:
+                if t.is_done():
+                    await client.send_message(t.get_channel(), "Timer set by " + t.get_member().mention + " is done.")
+                    timers.remove(t)
 
 @client.event
 async def on_member_remove(member):
     print(member.name, "has logged out.")
 
-t1 = threading.Thread(target=timer_thread)
-t1.start()
 client.run(TOKEN)
