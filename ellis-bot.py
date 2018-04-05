@@ -7,7 +7,7 @@ import asyncio
 import random
 
 TOKEN = "NDMwNzA2NzQ4ODUzMTkwNjU2.DaUJSw.1GOfezdHzVV5ARD1DRLpniLyZZw"
-repo = r"https://github.com/Nytra/Ellis-Bot"
+repo = "https://github.com/Nytra/Ellis-Bot"
 
 client = discord.Client()
 
