@@ -159,6 +159,32 @@ async def on_message(message):
             msg = "Tails!"
         await client.send_message(message.channel, msg)
 
+    if message.content.startswith("!rand"):
+        args = message.content.split()
+        if len(args) == 3:
+            n = random.randint(int(args[1]), int(args[2]))
+            msg = str(n)
+        elif len(args) == 2:
+            n = random.randint(0, int(args[1]))
+            msg = str(n)
+        elif len(args) == 1:
+            n = random.randint(0, 10)
+            msg = str(n)
+        await client.send_message(message.channel, msg)
+
+    if message.content.startswith("!hat"):
+        done = False
+        while not done:
+            done = True
+            m = random.choice(list(client.get_all_members()))
+            for role in m.roles:
+                if role.name == "Bots":
+                    done = False
+            if m.id == message.author.id:
+                done = False
+        msg = m.mention
+        await client.send_message(message.channel, msg)
+
 @client.event
 async def on_ready():
     print("Logged in successfully.")
