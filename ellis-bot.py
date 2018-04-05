@@ -155,7 +155,7 @@ async def on_message(message):
         await client.send_message(message.channel, help_msg)
 
     if message.content.startswith("!kill"):
-        await client.send_message(message.channel, "Shutting down...")
+        await client.send_message(message.channel, ":dizzy_face:")
         client.logout()
 
     if message.content.startswith("!flip"):
