@@ -5,6 +5,7 @@ import threading
 import time
 import asyncio
 import random
+import sqlite3
 
 TOKEN = "NDMwNzA2NzQ4ODUzMTkwNjU2.DaUJSw.1GOfezdHzVV5ARD1DRLpniLyZZw"
 repo = "https://github.com/Nytra/Ellis-Bot"
@@ -224,10 +225,98 @@ async def on_message(message):
             timers.append(Timer(t, message.author, message.channel))
             await client.send_message(message.channel, "Timer set.")
 
+    if args[0] == "!game":
+        if len(args) == 2:
+            word_count = int(args[1])
+        else:
+            word_count = 3
+        await spelling_test(message.author, message.channel, word_count)
+
+    if args[0] == "!challenge":
+        if len(args) == 2:
+            opponent = None
+            for user in client.get_all_members():
+                if user.mention == args[1]:
+                    opponent = user
+            if not opponent:
+                await client.send_message(message.channel, "Opponent not found.")
+            else:
+                await client.send_message(message.channel, "{} has challenged {}!".format(message.author.mention, opponent.mention))
+                await client.send_message(message.channel, "{}, do you accept this challenge? [y/n]".format(opponent.mention))
+                response = await client.wait_for_message(author=opponent, channel=message.channel)
+                if response.content.lower() == "y":
+                    await client.send_message(message.channel, "Challenge accepted!")
+                    await rockpaperscissors(message.channel, message.author, opponent)
+
+    if args[0] == "!leaderboard":
+        msg = \
+"""
+1. Example Name : Example Score
+2. Example Name : Example Score
+3. Example Name : Example Score
+"""
+        await client.send_message(message.channel, msg)
+
+async def rockpaperscissors(channel, member, opponent):
+    rules = {"r": "s",
+             "s": "p",
+             "p" : "r"}
+    done = False
+    turn = 0
+    participants = member, opponent
+    choices = [None, None]
+    while not done:
+        # [r, p]
+        if choices[0] is not None and choices[1] is not None:
+            # r -> s
+            # p -> r
+            if choices[0] == rules[choices[1]]:
+                await client.send_message(channel, opponent.mention + " wins!")
+                return
+            elif choices[0] == rules[choices[0]]:
+                await client.send_message(channel, member.mention + " wins!")
+                return
+            else:
+                await client.send_message(channel, "It's a draw.")
+            choices = [None, None]
+
+        dest = participants[turn]
+        pm = await client.send_message(dest, "r, p or s?")
+        valid = False
+        while not valid:
+            response = await client.wait_for_message(author=dest, channel=pm.channel)
+            if response.content.lower() in ("r", "p", "s"):
+                valid = True
+        n = len(list(choice for choice in choices if choice is not None))
+        if n == 0:
+            await client.send_message(dest, "Waiting for opponent...")
+        choices[turn] = response.content.lower()
+        if turn == 0:
+            turn = 1
+        else:
+            turn = 0
+
+async def spelling_test(member, channel, word_count):
+    words = ["horse", "dog", "pig", "cat", "antelope", "whale", "fox", "kangaroo", "giraffe"]
+    attempts = 0
+    for count in range(word_count):
+        word = random.choice(words)
+        words.remove(word)
+        word = word.lower()
+        await client.send_message(channel, word)
+        correct = False
+        while not correct:
+            attempts += 1
+            msg = await client.wait_for_message(author=member)
+            if msg.content.lower() == word:
+                correct = True
+    await client.send_message(channel, "Attempts: {}".format(attempts))
+
 @client.event
 async def on_ready():
     print("Logged in successfully.")
     print("-"*10)
+    #await client.send_message(list(channel for channel in client.get_all_channels() if channel.name == "bot-testing")[0], "Bot started.")
     await ticker()
 
 async def ticker():
@@ -242,6 +331,11 @@ async def ticker():
 @client.event
 async def on_member_remove(member):
     print(member.name, "has logged out.")
+
+@client.event
+async def on_client_join(member):
+    await client.send_message(list(channel for channel in client.get_all_channels() if channel.name == "general"),
+                              "Welcome, {}!".format(member.mention))
 
 @client.event
 async def on_error(event, *args, **kwargs):
