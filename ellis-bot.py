@@ -157,6 +157,7 @@ async def on_message(message):
     if message.content.startswith("!kill"):
         await client.send_message(message.channel, ":dizzy_face:")
         client.logout()
+        on_kill()
 
     if message.content.startswith("!flip"):
         n = random.randint(0, 1)
@@ -249,12 +250,15 @@ async def on_message(message):
                     await rockpaperscissors(message.channel, message.author, opponent)
 
     if args[0] == "!leaderboard":
-        msg = \
-"""
-1. Example Name : Example Score
-2. Example Name : Example Score
-3. Example Name : Example Score
-"""
+        msg = ""
+        c.execute("SELECT * FROM scores")
+        for record in c.fetchall():
+            score = record[1]
+            c.execute("SELECT discord_id FROM users WHERE user_id = ?", (int(record[0]),))
+            discord_id = c.fetchone()[0]
+            for m in client.get_all_members():
+                if m.id == discord_id:
+                    msg += "{} : {}".format(m.name, score)
         await client.send_message(message.channel, msg)
 
 async def rockpaperscissors(channel, member, opponent):
@@ -272,21 +276,41 @@ async def rockpaperscissors(channel, member, opponent):
             # p -> r
             if choices[0] == rules[choices[1]]:
                 await client.send_message(channel, opponent.mention + " wins!")
+                discord_id = opponent.id
+                c.execute("SELECT user_id FROM users WHERE discord_id = ?", (discord_id,))
+                user_id = int(c.fetchone()[0])
+                c.execute("SELECT wins FROM scores WHERE user_id = ?", (user_id,))
+                wins = int(c.fetchone()[0])
+                c.execute("UPDATE scores(wins) VALUES(?) WHERE user_id = ?", (wins + 1, user_id))
+                conn.commit()
                 return
             elif choices[0] == rules[choices[0]]:
                 await client.send_message(channel, member.mention + " wins!")
+                discord_id = member.id
+                c.execute("SELECT user_id FROM users WHERE discord_id = ?", (discord_id,))
+                user_id = int(c.fetchone()[0])
+                c.execute("SELECT wins FROM scores WHERE user_id = ?", (user_id,))
+                wins = int(c.fetchone()[0])
+                c.execute("UPDATE scores(wins) VALUES(?) WHERE user_id = ?", (wins + 1, user_id))
+                conn.commit()
                 return
             else:
                 await client.send_message(channel, "It's a draw.")
             choices = [None, None]
 
         dest = participants[turn]
+        # if turn == 0:
+        #     await client.send_message(participants[1], "Waiting for opponent...")
+        # else:
+        #     await client.send_message(participants[0], "Waiting for opponent...")
         pm = await client.send_message(dest, "r, p or s?")
         valid = False
         while not valid:
             response = await client.wait_for_message(author=dest, channel=pm.channel)
             if response.content.lower() in ("r", "p", "s"):
                 valid = True
+            else:
+                await client.send_message(dest, "Please select from 'r', 'p' or 's'")
         n = len(list(choice for choice in choices if choice is not None))
         if n == 0:
             await client.send_message(dest, "Waiting for opponent...")
@@ -317,6 +341,12 @@ async def on_ready():
     print("Logged in successfully.")
     print("-"*10)
     #await client.send_message(list(channel for channel in client.get_all_channels() if channel.name == "bot-testing")[0], "Bot started.")
+    for member in client.get_all_members():
+        c.execute("INSERT INTO IF NOT EXISTS users(discord_id) VALUES(?)", (member.id,))
+        c.execute("SELECT * FROM users WHERE discord_id = ?", (member.id,))
+        print(c.fetchone())
+        user_id = c.fetchone()[0]
+        c.execute("INSERT INTO IF NOT EXISTS scores(user_id, wins) VALUES(?, ?)", (user_id, 0))
     await ticker()
 
 async def ticker():
@@ -343,4 +373,13 @@ async def on_error(event, *args, **kwargs):
     if debug:
         await client.send_message(messages[-1].channel, "Error occurred in coroutine " + str(event))
 
+def on_kill():
+    conn.close()
+    quit(0)
+
+conn = sqlite3.connect("ellis.db")
+c = conn.cursor()
+c.execute("CREATE TABLE IF NOT EXISTS users(user_id INT PRIMARY KEY, discord_id TEXT);")
+c.execute("CREATE TABLE IF NOT EXISTS scores(score_id INT PRIMARY KEY, user_id INT, num_wins INT DEFAULT 0);")
+conn.commit()
 client.run(TOKEN)
