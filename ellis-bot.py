@@ -277,10 +277,10 @@ async def rockpaperscissors(channel, member, opponent):
             if choices[0] == rules[choices[1]]:
                 await client.send_message(channel, opponent.mention + " wins!")
                 discord_id = opponent.id
-                c.execute("SELECT user_id FROM users WHERE discord_id = ?", (discord_id,))
-                user_id = int(c.fetchone()[0])
-                c.execute("SELECT wins FROM scores WHERE user_id = ?", (user_id,))
-                wins = int(c.fetchone()[0])
+                c.execute("SELECT * FROM users WHERE discord_id = ?", (discord_id,))
+                user_id = c.fetchone()[0]
+                c.execute("SELECT * FROM scores WHERE user_id = ?", (user_id,))
+                wins = c.fetchone()[0]
                 c.execute("UPDATE scores(wins) VALUES(?) WHERE user_id = ?", (wins + 1, user_id))
                 conn.commit()
                 return
@@ -288,9 +288,9 @@ async def rockpaperscissors(channel, member, opponent):
                 await client.send_message(channel, member.mention + " wins!")
                 discord_id = member.id
                 c.execute("SELECT user_id FROM users WHERE discord_id = ?", (discord_id,))
-                user_id = int(c.fetchone()[0])
+                user_id = c.fetchone()[0]
                 c.execute("SELECT wins FROM scores WHERE user_id = ?", (user_id,))
-                wins = int(c.fetchone()[0])
+                wins = c.fetchone()[0]
                 c.execute("UPDATE scores(wins) VALUES(?) WHERE user_id = ?", (wins + 1, user_id))
                 conn.commit()
                 return
@@ -342,11 +342,11 @@ async def on_ready():
     print("-"*10)
     #await client.send_message(list(channel for channel in client.get_all_channels() if channel.name == "bot-testing")[0], "Bot started.")
     for member in client.get_all_members():
-        c.execute("INSERT INTO IF NOT EXISTS users(discord_id) VALUES(?)", (member.id,))
-        c.execute("SELECT * FROM users WHERE discord_id = ?", (member.id,))
-        print(c.fetchone())
-        user_id = c.fetchone()[0]
-        c.execute("INSERT INTO IF NOT EXISTS scores(user_id, wins) VALUES(?, ?)", (user_id, 0))
+        c.execute("INSERT INTO users(discord_id) VALUES(?)", (member.id,))
+    c.execute("SELECT * FROM users")
+    for user in c.fetchall():
+        c.execute("INSERT INTO scores(user_id) VALUES(?)", (user[0],))
+    conn.commit()
     await ticker()
 
 async def ticker():
@@ -379,7 +379,7 @@ def on_kill():
 
 conn = sqlite3.connect("ellis.db")
 c = conn.cursor()
-c.execute("CREATE TABLE IF NOT EXISTS users(user_id INT PRIMARY KEY, discord_id TEXT);")
-c.execute("CREATE TABLE IF NOT EXISTS scores(score_id INT PRIMARY KEY, user_id INT, num_wins INT DEFAULT 0);")
+c.execute("CREATE TABLE IF NOT EXISTS users(user_id INTEGER PRIMARY KEY, discord_id TEXT);")
+c.execute("CREATE TABLE IF NOT EXISTS scores(score_id INTEGER PRIMARY KEY, user_id INTEGER, num_wins INTEGER DEFAULT 0);")
 conn.commit()
 client.run(TOKEN)
