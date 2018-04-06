@@ -226,7 +226,7 @@ async def on_message(message):
             timers.append(Timer(t, message.author, message.channel))
             await client.send_message(message.channel, "Timer set.")
 
-    if args[0] == "!game":
+    if args[0] == "!spelling":
         if len(args) == 2:
             word_count = int(args[1])
         else:
@@ -244,21 +244,24 @@ async def on_message(message):
             else:
                 await client.send_message(message.channel, "{} has challenged {}!".format(message.author.mention, opponent.mention))
                 await client.send_message(message.channel, "{}, do you accept this challenge? [y/n]".format(opponent.mention))
-                response = await client.wait_for_message(author=opponent, channel=message.channel)
+                response = await client.wait_for_message(timeout=60*3, author=opponent, channel=message.channel)
                 if response.content.lower() == "y":
                     await client.send_message(message.channel, "Challenge accepted!")
                     await rockpaperscissors(message.channel, message.author, opponent)
+                elif response == None:
+                    await client.send_message(message.channel, "Opponent did not respond in time.")
 
     if args[0] == "!leaderboard":
         msg = ""
-        c.execute("SELECT * FROM scores")
+        c.execute("SELECT * FROM scores ORDER BY num_wins DESC")
         for record in c.fetchall():
-            score = record[1]
-            c.execute("SELECT discord_id FROM users WHERE user_id = ?", (int(record[0]),))
-            discord_id = c.fetchone()[0]
+            user_id = record[1]
+            num_wins = record[2]
+            c.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
+            discord_id = c.fetchone()[1]
             for m in client.get_all_members():
                 if m.id == discord_id:
-                    msg += "{} : {}".format(m.name, score)
+                    msg += "{} : {}\n".format(m.name, num_wins)
         await client.send_message(message.channel, msg)
 
 async def rockpaperscissors(channel, member, opponent):
@@ -266,7 +269,7 @@ async def rockpaperscissors(channel, member, opponent):
              "s": "p",
              "p" : "r"}
     done = False
-    turn = 0
+    turn = random.choice((0, 1))
     participants = member, opponent
     choices = [None, None]
     while not done:
@@ -280,18 +283,18 @@ async def rockpaperscissors(channel, member, opponent):
                 c.execute("SELECT * FROM users WHERE discord_id = ?", (discord_id,))
                 user_id = c.fetchone()[0]
                 c.execute("SELECT * FROM scores WHERE user_id = ?", (user_id,))
-                wins = c.fetchone()[0]
-                c.execute("UPDATE scores(wins) VALUES(?) WHERE user_id = ?", (wins + 1, user_id))
+                num_wins = c.fetchone()[2]
+                c.execute("UPDATE scores SET num_wins = ? WHERE user_id = ?", (num_wins + 1, user_id))
                 conn.commit()
                 return
             elif choices[0] == rules[choices[0]]:
                 await client.send_message(channel, member.mention + " wins!")
                 discord_id = member.id
-                c.execute("SELECT user_id FROM users WHERE discord_id = ?", (discord_id,))
+                c.execute("SELECT * FROM users WHERE discord_id = ?", (discord_id,))
                 user_id = c.fetchone()[0]
-                c.execute("SELECT wins FROM scores WHERE user_id = ?", (user_id,))
-                wins = c.fetchone()[0]
-                c.execute("UPDATE scores(wins) VALUES(?) WHERE user_id = ?", (wins + 1, user_id))
+                c.execute("SELECT * FROM scores WHERE user_id = ?", (user_id,))
+                num_wins = c.fetchone()[2]
+                c.execute("UPDATE scores SET num_wins = ? WHERE user_id = ?", (num_wins + 1, user_id))
                 conn.commit()
                 return
             else:
@@ -341,11 +344,15 @@ async def on_ready():
     print("Logged in successfully.")
     print("-"*10)
     #await client.send_message(list(channel for channel in client.get_all_channels() if channel.name == "bot-testing")[0], "Bot started.")
-    for member in client.get_all_members():
-        c.execute("INSERT INTO users(discord_id) VALUES(?)", (member.id,))
+    for member in list(m for m in client.get_all_members() if "Bots" not in list(role.name for role in m.roles)):
+        c.execute("SELECT * FROM users WHERE discord_id = ?", (member.id,))
+        if not c.fetchone():
+            c.execute("INSERT INTO users(discord_id) VALUES(?)", (member.id,))
     c.execute("SELECT * FROM users")
     for user in c.fetchall():
-        c.execute("INSERT INTO scores(user_id) VALUES(?)", (user[0],))
+        c.execute("SELECT * FROM scores WHERE user_id = ?", (user[0],))
+        if not c.fetchone():
+            c.execute("INSERT INTO scores(user_id) VALUES(?)", (user[0],))
     conn.commit()
     await ticker()
 
