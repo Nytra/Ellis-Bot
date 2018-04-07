@@ -14,7 +14,6 @@ client = discord.Client()
 
 debug = False
 start_time = int(time.time())
-messages = []
 timers = []
 
 help_msg = """!hello - Ellis will greet you.
@@ -49,7 +48,6 @@ class Timer:
 async def on_message(message):
     global debug
 
-    messages.append(message)
     args = message.content.split()
 
     if len(args) == 0:
@@ -180,7 +178,7 @@ async def on_message(message):
             msg = str(n)
         await client.send_message(message.channel, msg)
 
-    if message.content.startswith("!hat"):
+    if args[0] == "!hat":
         done = False
         n = 0
         while not done:
@@ -226,13 +224,6 @@ async def on_message(message):
             timers.append(Timer(t, message.author, message.channel))
             await client.send_message(message.channel, "Timer set.")
 
-    if args[0] == "!spelling":
-        if len(args) == 2:
-            word_count = int(args[1])
-        else:
-            word_count = 3
-        await spelling_test(message.author, message.channel, word_count)
-
     if args[0] == "!challenge":
         if len(args) == 2:
             opponent = None
@@ -263,6 +254,120 @@ async def on_message(message):
                 if m.id == discord_id:
                     msg += "{} : {}\n".format(m.name, num_wins)
         await client.send_message(message.channel, msg)
+
+    if args[0] == "!tts":
+        if len(args) > 1:
+            text = " ".join(s for s in args[1:])
+            await client.send_message(message.channel, text, tts=True)
+
+    if args[0] == "!purge":
+        if len(args) == 2:
+            try:
+                int(args[1])
+                await client.send_message(message.channel, "Deleting {} messages...".format(args[1]))
+                await asyncio.sleep(2)
+                await client.purge_from(message.channel, limit=int(args[1]))
+            except ValueError:
+                await client.send_message(message.channel, "The purge limit must be an integer.")
+        else:
+            await client.send_message(message.channel, "Deleting 100 messages...")
+            await asyncio.sleep(2)
+            await client.purge_from(message.channel)
+
+    if args[0] == "!create_station":
+        if len(args) == 2:
+            station_name = args[1]
+            await client.create_channel(message.server, station_name, type=discord.ChannelType.voice)
+            c.execute("INSERT INTO stations(station_name) VALUES(?)", (station_name,))
+            conn.commit()
+
+    if args[0] == "!playlist":
+        if len(args) == 2:
+            station_name = args[1]
+            c.execute("SELECT * FROM stations WHERE station_name = ?", (station_name,))
+            station = c.fetchone()
+            if not station:
+                await client.send_message(message.channel, "That station does not exist.")
+            else:
+                song_ids = station[2]
+                msg = ""
+                for char in song_ids:
+                    try:
+                        int(char)
+                        c.execute("SELECT * FROM songs WHERE song_id = ?", (char,))
+                        song = c.fetchone()
+                        song_name = song[3]
+                        song_uploader = song[4]
+                        song_url = song[2]
+                        user_id = song[1]
+                        c.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
+                        discord_id = c.fetchone()[1]
+                        for member in message.server.members:
+                            if member.id == discord_id:
+                                name = member.name
+                        msg += "Title: {}\nUploader: {}\nAdded by: {}\nURL: {}\n\n".format(song_name, song_uploader, name, song_url)
+                    except:
+                        pass
+                await client.send_message(message.channel, msg)
+
+    if args[0] == "!add_song":
+        if len(args) == 3:
+            station_name = args[1]
+            url = args[2]
+            c.execute("SELECT * FROM users WHERE discord_id = ?", (message.author.id,))
+            user_id = c.fetchone()[0]
+
+            c.execute("SELECT * FROM stations WHERE station_name = ?", (station_name,))
+            #print(c.fetchone())
+            station = c.fetchone()
+            if not station:
+                await client.send_message(message.channel, "Station \"{}\" does not exist.".format(station_name))
+            else:
+                await client.send_message(message.channel, "Adding the song to the playlist...")
+                song_ids = station[2]
+                if not song_ids:
+                    song_ids = ""
+                if client.is_voice_connected(message.server):
+                    voice_client = client.voice_client_in(message.server)
+                    voice_client.disconnect()
+                else:
+                    for channel in message.server.channels:
+                        if channel.name == station_name:
+                            voice_channel = channel
+                            voice_client = await client.join_voice_channel(voice_channel)
+                player = await voice_client.create_ytdl_player(url)
+                song_name = player.title
+                song_artist = player.uploader
+                player.stop()
+                voice_client.disconnect()
+                c.execute("INSERT INTO songs(user_id, url, song_title, song_artist) VALUES(?, ?, ?, ?)", (user_id, url, song_name, song_artist))
+                c.execute("SELECT * FROM songs WHERE url = ?", (url,))
+                song_id = c.fetchone()[0]
+                c.execute("UPDATE stations SET song_ids = ? WHERE station_name = ?", (song_ids + ",{}".format(song_id), station_name))
+                conn.commit()
+                await client.send_message(message.channel, "The song has been added to the playlist.".format(station_name))
+
+    if args[0] == "!start_station":
+        if len(args) == 2:
+            station_name = args[1]
+            c.execute("SELECT * FROM stations WHERE station_name = ?", (station_name,))
+            station = c.fetchone()
+            if not station:
+                await client.send_message(message.channel, "That station does not exist.")
+            else:
+                await client.send_message(message.channel, "Starting station...")
+                if client.is_voice_connected(message.server):
+                    voice_client = client.voice_client_in(message.server)
+                    await voice_client.disconnect()
+                for channel in message.server.channels:
+                    if channel.name == station_name:
+                        voice = await client.join_voice_channel(channel)
+                song_ids = station[2]
+                songs = parse_raw_song_ids(song_ids)
+                for song in songs:
+                    player = await voice.create_ytdl_player(song[2])
+                    player.start()
+                    await asyncio.sleep(player.duration)
 
 async def rockpaperscissors(channel, member, opponent):
     rules = {"r": "s",
@@ -323,27 +428,21 @@ async def rockpaperscissors(channel, member, opponent):
         else:
             turn = 0
 
-async def spelling_test(member, channel, word_count):
-    words = ["horse", "dog", "pig", "cat", "antelope", "whale", "fox", "kangaroo", "giraffe"]
-    attempts = 0
-    for count in range(word_count):
-        word = random.choice(words)
-        words.remove(word)
-        word = word.lower()
-        await client.send_message(channel, word)
-        correct = False
-        while not correct:
-            attempts += 1
-            msg = await client.wait_for_message(author=member)
-            if msg.content.lower() == word:
-                correct = True
-    await client.send_message(channel, "Attempts: {}".format(attempts))
+def parse_raw_song_ids(song_ids):
+    songs = []
+    for char in song_ids:
+        try:
+            int(char)
+            c.execute("SELECT * FROM songs WHERE song_id = ?", (char,))
+            song = c.fetchone()
+            songs.append(song)
+        except:
+            pass
+    return songs
 
 @client.event
 async def on_ready():
     print("Logged in successfully.")
-    print("-"*10)
-    #await client.send_message(list(channel for channel in client.get_all_channels() if channel.name == "bot-testing")[0], "Bot started.")
     for member in list(m for m in client.get_all_members() if "Bots" not in list(role.name for role in m.roles)):
         c.execute("SELECT * FROM users WHERE discord_id = ?", (member.id,))
         if not c.fetchone():
@@ -367,18 +466,12 @@ async def ticker():
 
 @client.event
 async def on_member_remove(member):
-    print(member.name, "has logged out.")
+    print(member.name, "has been removed.")
 
 @client.event
 async def on_client_join(member):
     await client.send_message(list(channel for channel in client.get_all_channels() if channel.name == "general"),
                               "Welcome, {}!".format(member.mention))
-
-@client.event
-async def on_error(event, *args, **kwargs):
-    global debug
-    if debug:
-        await client.send_message(messages[-1].channel, "Error occurred in coroutine " + str(event))
 
 def on_kill():
     conn.close()
@@ -388,5 +481,8 @@ conn = sqlite3.connect("ellis.db")
 c = conn.cursor()
 c.execute("CREATE TABLE IF NOT EXISTS users(user_id INTEGER PRIMARY KEY, discord_id TEXT);")
 c.execute("CREATE TABLE IF NOT EXISTS scores(score_id INTEGER PRIMARY KEY, user_id INTEGER, num_wins INTEGER DEFAULT 0);")
+c.execute("CREATE TABLE IF NOT EXISTS stations(station_id INTEGER PRIMARY KEY, station_name TEXT, song_ids TEXT)")
+c.execute("CREATE TABLE IF NOT EXISTS songs(song_id INTEGER PRIMARY KEY, user_id INTEGER, url TEXT, song_title TEXT, song_artist TEXT)")
 conn.commit()
+print("Starting...")
 client.run(TOKEN)
