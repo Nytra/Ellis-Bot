@@ -1,22 +1,16 @@
 import discord
 import time
 import datetime
-import threading
-import time
 import asyncio
 import random
 import sqlite3
+from collections import namedtuple
 
 with open("token.txt", "r") as f:
-    lines = f.readlines()
+    tokens = list(line.strip() for line in f.readlines())
     f.close()
 
-TOKEN = lines[0].strip()
-
-#TOKEN = "NDMwNzA2NzQ4ODUzMTkwNjU2.DaUJSw.1GOfezdHzVV5ARD1DRLpniLyZZw"
 repo = "https://github.com/Nytra/Ellis-Bot"
-
-client = discord.Client()
 
 debug = False
 start_time = int(time.time())
@@ -24,16 +18,20 @@ timers = []
 current_song = None
 current_player = None
 
-help_msg = """!hello - Ellis will greet you.
-!pig - Tells you who the Fortnite Pig currently is.
-!poke [target] - Ellis will poke the target.
-!debug - Enables debugging mode.
-!datetime - Displays the current date and time.
-!dumpvars - Displays a list of all of Ellis's variables and their respective values.
-!uptime - Tells you how long Ellis has been online for.
-!source - Provides you with a link to this project's GitHub repository.
-!help - Displays this message.
-!kill - Kills the bot."""
+Entry = namedtuple("Entry", "client event")
+entries = [
+    Entry(client=discord.Client(), event=asyncio.Event()),
+    Entry(client=discord.Client(), event=asyncio.Event()),
+    Entry(client=discord.Client(), event=asyncio.Event()),
+    Entry(client=discord.Client(), event=asyncio.Event())
+]
+
+controller = entries[0].client
+radio_1 = entries[1].client
+radio_2 = entries[2].client
+radio_3 = entries[3].client
+
+help_msg = "none"
 
 class Timer:
     def __init__(self, unix, member, channel):
@@ -52,7 +50,7 @@ class Timer:
     def get_channel(self):
         return self.channel
 
-@client.event
+@controller.event
 async def on_message(message):
     global debug, current_song, current_player
 
@@ -61,41 +59,41 @@ async def on_message(message):
     if len(args) == 0:
         return
 
-    if message.author == client.user:
+    if message.author == controller.user:
         return
 
     for role in message.author.roles:
         if role.name == "Fortnite Pig":
             msg = "OINK " + message.author.mention
-            await client.send_message(message.channel, msg)
+            await controller.send_message(message.channel, msg)
 
     if debug == True:
         msg = "Received message from " + message.author.mention + " in channel " + message.channel.mention
-        await client.send_message(message.channel, msg)
+        await controller.send_message(message.channel, msg)
 
     if message.content.startswith("!hello"):
         msg = "Hello {0.author.mention}".format(message)
-        await client.send_message(message.channel, msg)
+        await controller.send_message(message.channel, msg)
 
     if message.content.startswith("!pig"):
         msg = "The Fortnite Pig is "
-        members = client.get_all_members()
+        members = controller.get_all_members()
         for member in members:
             for role in member.roles:
                 if role.name == "Fortnite Pig":
                     msg += member.mention
-        await client.send_message(message.channel, msg)
+        await controller.send_message(message.channel, msg)
 
     if message.content.startswith("!poke"):
         parts = message.content.split()
         if len(parts) > 1:
-            for member in client.get_all_members():
+            for member in controller.get_all_members():
                 if len(parts) > 1 and member.mention == parts[1]:
                     msg = "*" + message.author.mention + " pokes " + member.mention + "*"
         else:
             msg = "Please provide a target."
 
-        await client.send_message(message.channel, msg)
+        await controller.send_message(message.channel, msg)
 
     if message.content.startswith("!debug"):
         if debug == True:
@@ -105,7 +103,7 @@ async def on_message(message):
             debug = True
             msg = "Debugging enabled."
 
-        await client.send_message(message.channel, msg)
+        await controller.send_message(message.channel, msg)
 
     if message.content.startswith("!datetime"):
         dt = datetime.datetime.now()
@@ -115,15 +113,15 @@ async def on_message(message):
                                              dt.hour,
                                              dt.minute,
                                              dt.second)
-        await client.send_message(message.channel, msg)
+        await controller.send_message(message.channel, msg)
 
     if debug and message.content.startswith("!dumpvars"):
         msg = "Dumping vars..."
-        await client.send_message(message.channel, msg)
+        await controller.send_message(message.channel, msg)
         msg = ""
         for var in globals():
             msg += str(var) + " = " + str(globals()[var]) + "\n"
-        await client.send_message(message.channel, msg)
+        await controller.send_message(message.channel, msg)
 
     if message.content.startswith("!uptime"):
         t = int(time.time()) - start_time
@@ -151,18 +149,18 @@ async def on_message(message):
             msg = "Ellis has been online for {} minutes {} seconds.".format(minutes, seconds)
         elif seconds > 0:
             msg = "Ellis has been online for {} seconds.".format(seconds)
-        await client.send_message(message.channel, msg)
+        await controller.send_message(message.channel, msg)
 
     if message.content.startswith("!source"):
         msg = repo
-        await client.send_message(message.channel, msg)
+        await controller.send_message(message.channel, msg)
 
     if message.content.startswith("!help"):
-        await client.send_message(message.channel, help_msg)
+        await controller.send_message(message.channel, help_msg)
 
     if message.content.startswith("!kill"):
-        await client.send_message(message.channel, ":dizzy_face:")
-        client.logout()
+        await controller.send_message(message.channel, ":dizzy_face:")
+        controller.logout()
         on_kill()
 
     if message.content.startswith("!flip"):
@@ -171,7 +169,7 @@ async def on_message(message):
             msg = "Heads!"
         else:
             msg = "Tails!"
-        await client.send_message(message.channel, msg)
+        await controller.send_message(message.channel, msg)
 
     if message.content.startswith("!rand"):
         args = message.content.split()
@@ -184,7 +182,7 @@ async def on_message(message):
         elif len(args) == 1:
             n = random.randint(0, 10)
             msg = str(n)
-        await client.send_message(message.channel, msg)
+        await controller.send_message(message.channel, msg)
 
     if args[0] == "!hat":
         done = False
@@ -192,21 +190,21 @@ async def on_message(message):
         while not done:
             n += 1
             done = True
-            m = random.choice(list(client.get_all_members()))
+            m = random.choice(list(ellis.get_all_members()))
             for role in m.roles:
                 if role.name == "Bots":
                     done = False
         if debug:
-            await client.send_message(message.channel, str(n) + " iterations")
+            await controller.send_message(message.channel, str(n) + " iterations")
         msg = m.mention
-        await client.send_message(message.channel, msg)
+        await controller.send_message(message.channel, msg)
 
     if args[0] == "!idiot":
-        await client.send_message(message.channel, "I am an idiot.")
+        await controller.send_message(message.channel, "I am an idiot.")
 
     if args[0] == "!server":
         msg = ""
-        for server in client.servers:
+        for server in controller.servers:
             msg += "ID: " + server.id + "\n"
             msg += "Name: " + server.name + "\n"
             dt = server.created_at
@@ -224,31 +222,31 @@ async def on_message(message):
             msg += "Channels: " + str(len(list(channel for channel in server.channels
                                                if channel.type == discord.ChannelType.text
                                                or channel.type == discord.ChannelType.voice)))
-            await client.send_message(message.channel, msg)
+            await controller.send_message(message.channel, msg)
 
     if args[0] == "!timer":
         if len(args) == 2:
             t = int(time.time()) + int(args[1])
             timers.append(Timer(t, message.author, message.channel))
-            await client.send_message(message.channel, "Timer set.")
+            await controller.send_message(message.channel, "Timer set.")
 
     if args[0] == "!challenge":
         if len(args) == 2:
             opponent = None
-            for user in client.get_all_members():
+            for user in controller.get_all_members():
                 if user.mention == args[1]:
                     opponent = user
             if not opponent:
-                await client.send_message(message.channel, "Opponent not found.")
+                await controller.send_message(message.channel, "Opponent not found.")
             else:
-                await client.send_message(message.channel, "{} has challenged {}!".format(message.author.mention, opponent.mention))
-                await client.send_message(message.channel, "{}, do you accept this challenge? [y/n]".format(opponent.mention))
-                response = await client.wait_for_message(timeout=60*3, author=opponent, channel=message.channel)
+                await controller.send_message(message.channel, "{} has challenged {}!".format(message.author.mention, opponent.mention))
+                await controller.send_message(message.channel, "{}, do you accept this challenge? [y/n]".format(opponent.mention))
+                response = await controller.wait_for_message(timeout=60*3, author=opponent, channel=message.channel)
                 if response.content.lower() == "y":
-                    await client.send_message(message.channel, "Challenge accepted!")
+                    await controller.send_message(message.channel, "Challenge accepted!")
                     await rockpaperscissors(message.channel, message.author, opponent)
                 elif response == None:
-                    await client.send_message(message.channel, "Opponent did not respond in time.")
+                    await controller.send_message(message.channel, "Opponent did not respond in time.")
 
     if args[0] == "!leaderboard":
         msg = ""
@@ -258,34 +256,34 @@ async def on_message(message):
             num_wins = record[2]
             c.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
             discord_id = c.fetchone()[1]
-            for m in client.get_all_members():
+            for m in controller.get_all_members():
                 if m.id == discord_id:
                     msg += "{} : {}\n".format(m.name, num_wins)
-        await client.send_message(message.channel, msg)
+        await controller.send_message(message.channel, msg)
 
     if args[0] == "!tts":
         if len(args) > 1:
             text = " ".join(s for s in args[1:])
-            await client.send_message(message.channel, text, tts=True)
+            await controller.send_message(message.channel, text, tts=True)
 
     if args[0] == "!purge":
         if len(args) == 2:
             try:
                 int(args[1])
-                await client.send_message(message.channel, "Deleting {} messages...".format(args[1]))
+                await controller.send_message(message.channel, "Deleting {} messages...".format(args[1]))
                 await asyncio.sleep(2)
-                await client.purge_from(message.channel, limit=int(args[1]))
+                await controller.purge_from(message.channel, limit=int(args[1]))
             except ValueError:
-                await client.send_message(message.channel, "The purge limit must be an integer.")
+                await controller.send_message(message.channel, "The purge limit must be an integer.")
         else:
-            await client.send_message(message.channel, "Deleting 100 messages...")
+            await controller.send_message(message.channel, "Deleting 100 messages...")
             await asyncio.sleep(2)
-            await client.purge_from(message.channel)
+            await controller.purge_from(message.channel)
 
     if args[0] == "!create_station":
         if len(args) == 2:
             station_name = args[1]
-            await client.create_channel(message.server, station_name, type=discord.ChannelType.voice)
+            await controller.create_channel(message.server, station_name, type=discord.ChannelType.voice)
             c.execute("INSERT INTO stations(station_name) VALUES(?)", (station_name,))
             conn.commit()
 
@@ -295,7 +293,7 @@ async def on_message(message):
             c.execute("SELECT * FROM stations WHERE station_name = ?", (station_name,))
             station = c.fetchone()
             if not station:
-                await client.send_message(message.channel, "That station does not exist.")
+                await controller.send_message(message.channel, "That station does not exist.")
             else:
                 song_ids = station[2]
                 msg = ""
@@ -316,7 +314,7 @@ async def on_message(message):
                         msg += "Title: {}\nUploader: {}\nAdded by: {}\nURL: {}\n\n".format(song_name, song_uploader, name, song_url)
                     except:
                         pass
-                await client.send_message(message.channel, msg)
+                await controller.send_message(message.channel, msg)
 
     if args[0] == "!add_song":
         if len(args) == 3:
@@ -329,20 +327,20 @@ async def on_message(message):
             #print(c.fetchone())
             station = c.fetchone()
             if not station:
-                await client.send_message(message.channel, "Station \"{}\" does not exist.".format(station_name))
+                await controller.send_message(message.channel, "Station \"{}\" does not exist.".format(station_name))
             else:
-                await client.send_message(message.channel, "Adding the song to the playlist...")
+                await controller.send_message(message.channel, "Adding the song to the playlist...")
                 song_ids = station[2]
                 if not song_ids:
                     song_ids = ""
-                if client.is_voice_connected(message.server):
-                    voice_client = client.voice_client_in(message.server)
+                if controller.is_voice_connected(message.server):
+                    voice_client = controller.voice_client_in(message.server)
                     voice_client.disconnect()
                 else:
                     for channel in message.server.channels:
                         if channel.name == station_name:
                             voice_channel = channel
-                            voice_client = await client.join_voice_channel(voice_channel)
+                            voice_client = await controller.join_voice_channel(voice_channel)
                 player = await voice_client.create_ytdl_player(url)
                 song_name = player.title
                 song_artist = player.uploader
@@ -353,7 +351,7 @@ async def on_message(message):
                 song_id = c.fetchone()[0]
                 c.execute("UPDATE stations SET song_ids = ? WHERE station_name = ?", (song_ids + ",{}".format(song_id), station_name))
                 conn.commit()
-                await client.send_message(message.channel, "The song has been added to the playlist.".format(station_name))
+                await controller.send_message(message.channel, "The song has been added to the playlist.".format(station_name))
 
     if args[0] == "!start_station":
         if len(args) == 2:
@@ -361,15 +359,15 @@ async def on_message(message):
             c.execute("SELECT * FROM stations WHERE station_name = ?", (station_name,))
             station = c.fetchone()
             if not station:
-                await client.send_message(message.channel, "That station does not exist.")
+                await controller.send_message(message.channel, "That station does not exist.")
             else:
-                await client.send_message(message.channel, "Starting station...")
-                if client.is_voice_connected(message.server):
-                    voice_client = client.voice_client_in(message.server)
+                await controller.send_message(message.channel, "Starting station...")
+                if controller.is_voice_connected(message.server):
+                    voice_client = controller.voice_client_in(message.server)
                     await voice_client.disconnect()
                 for channel in message.server.channels:
                     if channel.name == station_name:
-                        voice = await client.join_voice_channel(channel)
+                        voice = await controller.join_voice_channel(channel)
                 song_ids = station[2]
                 songs = parse_raw_song_ids(song_ids)
                 for song in songs:
@@ -386,12 +384,12 @@ async def on_message(message):
 
     if args[0] == "!song":
         if current_song is not None:
-            await client.send_message(message.channel, current_song[3])
+            await controller.send_message(message.channel, current_song[3])
         else:
-            await client.send_message(message.channel, "No song is currently playing.")
+            await controller.send_message(message.channel, "No song is currently playing.")
 
     if args[0] == "!skip":
-        if client.is_voice_connected(message.server) and current_player is not None:
+        if controller.is_voice_connected(message.server) and current_player is not None:
             current_player.stop()
 
 async def rockpaperscissors(channel, member, opponent):
@@ -408,7 +406,7 @@ async def rockpaperscissors(channel, member, opponent):
             # r -> s
             # p -> r
             if choices[0] == rules[choices[1]]:
-                await client.send_message(channel, opponent.mention + " wins!")
+                await controller.send_message(channel, opponent.mention + " wins!")
                 discord_id = opponent.id
                 c.execute("SELECT * FROM users WHERE discord_id = ?", (discord_id,))
                 user_id = c.fetchone()[0]
@@ -418,7 +416,7 @@ async def rockpaperscissors(channel, member, opponent):
                 conn.commit()
                 return
             elif choices[0] == rules[choices[0]]:
-                await client.send_message(channel, member.mention + " wins!")
+                await controller.send_message(channel, member.mention + " wins!")
                 discord_id = member.id
                 c.execute("SELECT * FROM users WHERE discord_id = ?", (discord_id,))
                 user_id = c.fetchone()[0]
@@ -428,25 +426,25 @@ async def rockpaperscissors(channel, member, opponent):
                 conn.commit()
                 return
             else:
-                await client.send_message(channel, "It's a draw.")
+                await controller.send_message(channel, "It's a draw.")
             choices = [None, None]
 
         dest = participants[turn]
         # if turn == 0:
-        #     await client.send_message(participants[1], "Waiting for opponent...")
+        #     await ellis.send_message(participants[1], "Waiting for opponent...")
         # else:
-        #     await client.send_message(participants[0], "Waiting for opponent...")
-        pm = await client.send_message(dest, "r, p or s?")
+        #     await ellis.send_message(participants[0], "Waiting for opponent...")
+        pm = await controller.send_message(dest, "r, p or s?")
         valid = False
         while not valid:
-            response = await client.wait_for_message(author=dest, channel=pm.channel)
+            response = await controller.wait_for_message(author=dest, channel=pm.channel)
             if response.content.lower() in ("r", "p", "s"):
                 valid = True
             else:
-                await client.send_message(dest, "Please select from 'r', 'p' or 's'")
+                await controller.send_message(dest, "Please select from 'r', 'p' or 's'")
         n = len(list(choice for choice in choices if choice is not None))
         if n == 0:
-            await client.send_message(dest, "Waiting for opponent...")
+            await controller.send_message(dest, "Waiting for opponent...")
         choices[turn] = response.content.lower()
         if turn == 0:
             turn = 1
@@ -465,10 +463,10 @@ def parse_raw_song_ids(song_ids):
             pass
     return songs
 
-@client.event
+@controller.event
 async def on_ready():
     print("Logged in successfully.")
-    for member in list(m for m in client.get_all_members() if "Bots" not in list(role.name for role in m.roles)):
+    for member in list(m for m in controller.get_all_members() if "Bots" not in list(role.name for role in m.roles)):
         c.execute("SELECT * FROM users WHERE discord_id = ?", (member.id,))
         if not c.fetchone():
             c.execute("INSERT INTO users(discord_id) VALUES(?)", (member.id,))
@@ -486,16 +484,16 @@ async def ticker():
         if timers:
             for t in timers:
                 if t.is_done():
-                    await client.send_message(t.get_channel(), "Timer set by " + t.get_member().mention + " is done.")
+                    await controller.send_message(t.get_channel(), "Timer set by " + t.get_member().mention + " is done.")
                     timers.remove(t)
 
-@client.event
+@controller.event
 async def on_member_remove(member):
     print(member.name, "has been removed.")
 
-@client.event
+@controller.event
 async def on_client_join(member):
-    await client.send_message(list(channel for channel in client.get_all_channels() if channel.name == "general"),
+    await controller.send_message(list(channel for channel in controller.get_all_channels() if channel.name == "general"),
                               "Welcome, {}!".format(member.mention))
 
 def on_kill():
@@ -510,4 +508,38 @@ c.execute("CREATE TABLE IF NOT EXISTS stations(station_id INTEGER PRIMARY KEY, s
 c.execute("CREATE TABLE IF NOT EXISTS songs(song_id INTEGER PRIMARY KEY, user_id INTEGER, url TEXT, song_title TEXT, song_artist TEXT)")
 conn.commit()
 print("Starting...")
-client.run(TOKEN)
+
+loop = asyncio.get_event_loop()
+
+async def login():
+    i = 0
+    for e in entries:
+        await e.client.login(tokens[i])
+        i += 1
+
+async def wrapped_connect(entry):
+    try:
+        await entry.client.connect()
+    except Exception as e:
+        await entry.client.close()
+        print("Error: ", e.__class__.__name__, e)
+        entry.event.set()
+
+async def check_close():
+    futures = [e.event.wait() for e in entries]
+    await asyncio.wait(futures)
+
+loop.run_until_complete(login())
+
+print("Logged in.")
+
+for entry in entries:
+    loop.create_task(wrapped_connect(entry))
+
+print("Connected.")
+
+loop.run_until_complete(check_close())
+
+print("Loop complete.")
+
+loop.close()
