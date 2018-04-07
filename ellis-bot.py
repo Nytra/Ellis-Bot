@@ -7,7 +7,11 @@ import asyncio
 import random
 import sqlite3
 
-TOKEN = "NDMwNzA2NzQ4ODUzMTkwNjU2.DaUJSw.1GOfezdHzVV5ARD1DRLpniLyZZw"
+from . import token
+
+TOKEN = token.TOKEN
+
+#TOKEN = "NDMwNzA2NzQ4ODUzMTkwNjU2.DaUJSw.1GOfezdHzVV5ARD1DRLpniLyZZw"
 repo = "https://github.com/Nytra/Ellis-Bot"
 
 client = discord.Client()
@@ -15,6 +19,8 @@ client = discord.Client()
 debug = False
 start_time = int(time.time())
 timers = []
+current_song = None
+current_player = None
 
 help_msg = """!hello - Ellis will greet you.
 !pig - Tells you who the Fortnite Pig currently is.
@@ -46,7 +52,7 @@ class Timer:
 
 @client.event
 async def on_message(message):
-    global debug
+    global debug, current_song, current_player
 
     args = message.content.split()
 
@@ -366,8 +372,25 @@ async def on_message(message):
                 songs = parse_raw_song_ids(song_ids)
                 for song in songs:
                     player = await voice.create_ytdl_player(song[2])
+                    current_song = song
+                    current_player = player
+                    print("Now playing \"{}\"".format(song[3]))
                     player.start()
-                    await asyncio.sleep(player.duration)
+                    while player.is_playing():
+                        await asyncio.sleep(1)
+                    player.stop()
+                current_song = None
+                current_player = None
+
+    if args[0] == "!song":
+        if current_song is not None:
+            await client.send_message(message.channel, current_song[3])
+        else:
+            await client.send_message(message.channel, "No song is currently playing.")
+
+    if args[0] == "!skip":
+        if client.is_voice_connected(message.server) and current_player is not None:
+            current_player.stop()
 
 async def rockpaperscissors(channel, member, opponent):
     rules = {"r": "s",
