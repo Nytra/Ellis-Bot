@@ -7,9 +7,11 @@ import asyncio
 import random
 import sqlite3
 
-from . import token
+with open("token.txt", "r") as f:
+    lines = f.readlines()
+    f.close()
 
-TOKEN = token.TOKEN
+TOKEN = lines[0].strip()
 
 #TOKEN = "NDMwNzA2NzQ4ODUzMTkwNjU2.DaUJSw.1GOfezdHzVV5ARD1DRLpniLyZZw"
 repo = "https://github.com/Nytra/Ellis-Bot"
