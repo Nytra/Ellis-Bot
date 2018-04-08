@@ -31,6 +31,20 @@ radio_1 = entries[1].client
 radio_2 = entries[2].client
 radio_3 = entries[3].client
 
+station_bots = radio_1, radio_2, radio_3
+
+players = {radio_1:None,
+           radio_2:None,
+           radio_3:None}
+
+songs = {radio_1:None,
+         radio_2:None,
+         radio_3:None}
+
+stations = {radio_1:None,
+            radio_2:None,
+            radio_3:None}
+
 help_msg = "none"
 
 class Timer:
@@ -283,9 +297,15 @@ async def on_message(message):
     if args[0] == "!create_station":
         if len(args) == 2:
             station_name = args[1]
-            await controller.create_channel(message.server, station_name, type=discord.ChannelType.voice)
-            c.execute("INSERT INTO stations(station_name) VALUES(?)", (station_name,))
-            conn.commit()
+            c.execute("SELECT * FROM stations")
+            stations = c.fetchall()
+            if len(stations) < 3:
+                await controller.create_channel(message.server, station_name, type=discord.ChannelType.voice)
+                c.execute("INSERT INTO stations(station_name) VALUES(?)", (station_name,))
+                conn.commit()
+                await controller.send_message(message.channel, "The station has been created.")
+            else:
+                await controller.send_message(message.channel, "The maximum number of stations has been reached.")
 
     if args[0] == "!playlist":
         if len(args) == 2:
@@ -362,27 +382,38 @@ async def on_message(message):
                 await controller.send_message(message.channel, "That station does not exist.")
             else:
                 await controller.send_message(message.channel, "Starting station...")
-                if controller.is_voice_connected(message.server):
-                    voice_client = controller.voice_client_in(message.server)
-                    await voice_client.disconnect()
+                voice_client = None
                 for channel in message.server.channels:
                     if channel.name == station_name:
-                        voice = await controller.join_voice_channel(channel)
-                song_ids = station[2]
-                songs = parse_raw_song_ids(song_ids)
-                for song in songs:
-                    player = await voice.create_ytdl_player(song[2])
-                    current_song = song
-                    current_player = player
-                    print("Now playing \"{}\"".format(song[3]))
-                    player.start()
-                    while player.is_playing():
-                        await asyncio.sleep(1)
-                    player.stop()
-                current_song = None
-                current_player = None
+                        voice_channel = channel
+                station_bot = None
+                for bot in station_bots:
+                    if not bot.is_voice_connected(message.server):
+                        voice_client = await bot.join_voice_channel(voice_channel)
+                        station_bot = bot
+                        stations[station_bot] = voice_channel
+                        break
+                if not voice_client:
+                    await controller.send_message(message.channel, "All stations are active.")
+                else:
+                    song_ids = station[2]
+                    songs = parse_raw_song_ids(song_ids)
+                    for song in songs:
+                        player = await voice_client.create_ytdl_player(song[2])
+                        songs[station_bot] = song[3]
+                        players[station_bot] = player
+                        print("Now playing \"{}\"".format(song[3]))
+                        player.start()
+                        while player.is_playing():
+                            await asyncio.sleep(1)
+                        player.stop()
+                    songs[station_bot] = None
+                    players[station_bot] = None
+                    stations[station_bot] = None
 
     if args[0] == "!song":
+        if len(args) == 2:
+            station_name = args[1]
         if current_song is not None:
             await controller.send_message(message.channel, current_song[3])
         else:
@@ -465,7 +496,7 @@ def parse_raw_song_ids(song_ids):
 
 @controller.event
 async def on_ready():
-    print("Logged in successfully.")
+    print("Ready.")
     for member in list(m for m in controller.get_all_members() if "Bots" not in list(role.name for role in m.roles)):
         c.execute("SELECT * FROM users WHERE discord_id = ?", (member.id,))
         if not c.fetchone():
@@ -516,6 +547,7 @@ async def login():
     for e in entries:
         await e.client.login(tokens[i])
         i += 1
+    print(i, "clients logged in.")
 
 async def wrapped_connect(entry):
     try:
@@ -529,14 +561,14 @@ async def check_close():
     futures = [e.event.wait() for e in entries]
     await asyncio.wait(futures)
 
+print("Logging in...")
+
 loop.run_until_complete(login())
 
-print("Logged in.")
+print("Connecting...")
 
 for entry in entries:
     loop.create_task(wrapped_connect(entry))
-
-print("Connected.")
 
 loop.run_until_complete(check_close())
 
