@@ -10,50 +10,14 @@ with open("token.txt", "r") as f:
     tokens = list(line.strip() for line in f.readlines())
     f.close()
 
-repo = "https://github.com/Nytra/Ellis-Bot"
-
-debug = False
-start_time = int(time.time())
-
-Entry = namedtuple("Entry", "client event")
-entries = [
-    Entry(client=discord.Client(), event=asyncio.Event()),
-    Entry(client=discord.Client(), event=asyncio.Event()),
-    Entry(client=discord.Client(), event=asyncio.Event()),
-    Entry(client=discord.Client(), event=asyncio.Event())
-]
-
-controller = entries[0].client
-station_bots = list(entry.client for entry in entries[1:])
-help_msg = "Not done yet."
-
-class Timer:
-    def __init__(self, unix, member, channel):
-        self.unix = unix
-        self.member = member
-        self.channel = channel
-
-    def is_done(self):
-        if int(time.time()) > self.unix:
-            return True
-        return False
-
-    def get_member(self):
-        return self.member
-
-    def get_channel(self):
-        return self.channel
-
 class StationBot:
     def __init__(self, bot_client):
         self.bot_client = bot_client
-        self.station_name = ""
-        self.song_name = ""
+        self.song = None
         self.channel = None
 
     def set_channel(self, channel):
         self.channel = channel
-        self.station_name = channel.name
 
     def get_channel(self):
         return self.channel
@@ -67,18 +31,49 @@ class StationBot:
     def get_bot_client(self):
         return self.bot_client
 
-    def set_song_name(self, song_name):
-        self.song_name = song_name
+    def set_song(self, song):
+        self.song = song
 
-    def get_song_name(self):
-        return self.song_name
+    def get_song(self):
+        return self.song
 
-temp = []
-for bot in station_bots:
-    station_bot = StationBot(bot)
-    temp.append(station_bot)
 
-station_bots = temp
+class Song:
+    def __init__(self, title, uploader):
+        self.title = title
+        self.uploader = uploader
+
+    def get_title(self):
+        return self.title
+
+    def get_uploader(self):
+        return self.uploader
+
+class Station:
+    def __init__(self, server, channel):
+        self.server = server
+        self.channel = channel
+
+    def set_active_dj(self, member):
+        pass
+
+
+repo = "https://github.com/Nytra/Ellis-Bot"
+help_msg = "Not done yet."
+
+debug = False
+start_time = int(time.time())
+
+Entry = namedtuple("Entry", "client event")
+entries = [
+    Entry(client=discord.Client(), event=asyncio.Event()),
+    Entry(client=discord.Client(), event=asyncio.Event()),
+    Entry(client=discord.Client(), event=asyncio.Event()),
+    Entry(client=discord.Client(), event=asyncio.Event())
+]
+
+controller = entries[0].client
+station_bots = list(StationBot(entry.client) for entry in entries[1:])
 
 @controller.event
 async def on_message(message):
@@ -149,7 +144,8 @@ async def on_message(message):
         await controller.send_message(message.channel, ":dizzy_face:")
         for e in entries:
             e.client.logout()
-        on_kill()
+        conn.close()
+        quit(0)
 
     if args[0] == "!server":
         msg = ""
@@ -176,11 +172,11 @@ async def on_message(message):
     if args[0] == "!create_station":
         if len(args) == 2:
             station_name = args[1]
-            c.execute("SELECT * FROM stations")
-            stations = list(station for station in c.fetchall() if station[1] == message.server.id)
+            c.execute("SELECT * FROM stations WHERE server_discord_id = ?", (message.server.id,))
+            stations = c.fetchall()
             if len(stations) < 3:
-                await controller.create_channel(message.server, station_name, type=discord.ChannelType.voice)
-                c.execute("INSERT INTO stations(server_discord_id, station_name) VALUES(?, ?)", (message.server.id, station_name))
+                channel = await controller.create_channel(message.server, station_name, type=discord.ChannelType.voice)
+                c.execute("INSERT INTO stations(server_discord_id, channel_discord_id) VALUES(?, ?)", (message.server.id, channel.id))
                 conn.commit()
                 await controller.send_message(message.channel, "The station has been created.")
             else:
@@ -189,104 +185,136 @@ async def on_message(message):
     if args[0] == "!playlist":
         if len(args) == 2:
             station_name = args[1]
-            c.execute("SELECT * FROM stations WHERE station_name = ?", (station_name,))
-            station = c.fetchone()
-            if not station:
+            station_channel = None
+            station_server = message.server
+            station_record = None
+
+            # find channel
+            for channel in message.server.channels:
+                if channel.name == station_name:
+                    station_channel = channel
+
+            if not station_channel:
                 await controller.send_message(message.channel, "That station does not exist.")
             else:
-                song_ids = station[2]
-                msg = ""
-                for char in song_ids:
-                    try:
-                        int(char)
-                        c.execute("SELECT * FROM songs WHERE song_id = ?", (char,))
-                        song = c.fetchone()
-                        song_name = song[3]
-                        song_uploader = song[4]
-                        song_url = song[2]
+
+                #find record
+                c.execute("SELECT * FROM stations WHERE server_discord_id = ? AND channel_discord_id = ?", (station_server.id, station_channel.id))
+                station_record = c.fetchone()
+                if not station_record:
+                    await controller.send_message(message.channel, "That station does not exist in my database.")
+                else:
+                    raw_song_ids = station_record[3]
+                    songs = parse_raw_song_ids(raw_song_ids)
+                    for song in songs:
+
+                        #c.execute("CREATE TABLE IF NOT EXISTS songs(song_id INTEGER PRIMARY KEY, user_id INTEGER, url TEXT, song_title TEXT, song_uploader TEXT)")
                         user_id = song[1]
+                        song_url = song[2]
+                        song_title = song[3]
+                        song_uploader = song[4]
                         c.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
-                        discord_id = c.fetchone()[1]
-                        for member in message.server.members:
-                            if member.id == discord_id:
-                                name = member.name
-                        msg += "Title: {}\nUploader: {}\nAdded by: {}\nURL: {}\n\n".format(song_name, song_uploader, name, song_url)
-                    except:
-                        pass
-                await controller.send_message(message.channel, msg)
+                        user = c.fetchone()
+
+                        if not user:
+                            msg = "Title: {}\nUploader: {}\nAdded by: Unknown User\nURL: {}\n\n".format(song_title, song_uploader, song_url)
+                        else:
+                            user_id = user[0]
+                            user_name = "Unknown User"
+                            for member in message.server.members:
+                                if member.id == user_id:
+                                    user_name = member.name
+                            msg = "Title: {}\nUploader: {}\nAdded by: {}\nURL: {}\n\n".format(song_title, song_uploader, user_name, song_url)
+                        await controller.send_message(message.channel, msg)
 
     if args[0] == "!add_song":
         if len(args) == 3:
             station_name = args[1]
-            url = args[2]
+            station_channel = None
+            station_server = message.server
+            song_url = args[2]
             c.execute("SELECT * FROM users WHERE discord_id = ?", (message.author.id,))
             user_id = c.fetchone()[0]
 
-            c.execute("SELECT * FROM stations WHERE station_name = ?", (station_name,))
-            #print(c.fetchone())
-            station = c.fetchone()
-            if not station:
-                await controller.send_message(message.channel, "Station \"{}\" does not exist.".format(station_name))
+            # find channel id
+            for channel in message.server.channels:
+                if channel.name == station_name:
+                    station_channel = channel
+
+            if not station_channel:
+                await controller.send_message(message.channel, "That station does not exist.")
             else:
-                await controller.send_message(message.channel, "Adding the song to the playlist...")
-                song_ids = station[2]
-                if not song_ids:
-                    song_ids = ""
-                if controller.is_voice_connected(message.server):
-                    voice_client = controller.voice_client_in(message.server)
-                    voice_client.disconnect()
+                c.execute("SELECT * FROM stations WHERE server_discord_id = ? AND channel_discord_id = ?", (station_server.id, station_channel.id))
+                station_record = c.fetchone()
+
+                if not station_record:
+                    await controller.send_message(message.channel, "That channel is not registered as a station.")
                 else:
-                    for channel in message.server.channels:
-                        if channel.name == station_name:
-                            voice_channel = channel
-                            voice_client = await controller.join_voice_channel(voice_channel)
-                player = await voice_client.create_ytdl_player(url)
-                song_name = player.title
-                song_artist = player.uploader
-                player.stop()
-                voice_client.disconnect()
-                c.execute("INSERT INTO songs(user_id, url, song_title, song_artist) VALUES(?, ?, ?, ?)", (user_id, url, song_name, song_artist))
-                c.execute("SELECT * FROM songs WHERE url = ?", (url,))
-                song_id = c.fetchone()[0]
-                c.execute("UPDATE stations SET song_ids = ? WHERE station_name = ?", (song_ids + ",{}".format(song_id), station_name))
-                conn.commit()
-                await controller.send_message(message.channel, "The song has been added to the playlist.".format(station_name))
+                    await controller.send_message(message.channel, "Adding the song to the playlist...")
+                    raw_song_ids = station_record[3]
+                    if not raw_song_ids:
+                        raw_song_ids = ""
+                    if controller.is_voice_connected(message.server):
+                        await controller.voice_client_in(message.server).disconnect()
+                    voice_client = await controller.join_voice_channel(station_channel)
+                    player = await voice_client.create_ytdl_player(song_url)
+                    song_title = player.title
+                    song_uploader = player.uploader
+                    player.stop()
+                    voice_client.disconnect()
+                    c.execute("INSERT INTO songs(user_id, url, song_title, song_uploader) VALUES(?, ?, ?, ?)", (user_id, song_url, song_title, song_uploader))
+                    c.execute("SELECT * FROM songs WHERE url = ?", (song_url,))
+                    song_id = c.fetchone()[0]
+                    if raw_song_ids == "":
+                        c.execute(
+                            "UPDATE stations SET song_ids = ? WHERE server_discord_id = ? AND channel_discord_id = ?",
+                            (song_id, station_server.id, station_channel.id))
+                    else:
+                        c.execute("UPDATE stations SET song_ids = ? WHERE server_discord_id = ? AND channel_discord_id = ?",
+                                  (raw_song_ids + "," + str(song_id), station_server.id, station_channel.id))
+                    conn.commit()
+                    await controller.send_message(message.channel, "The song has been added to the playlist.".format(station_name))
 
     if args[0] == "!start_station":
         if len(args) == 2:
             station_name = args[1]
-            c.execute("SELECT * FROM stations WHERE server_discord_id = ? AND station_name = ?", (message.server.id, station_name))
-            station = c.fetchone()
-            if not station:
+            station_channel = None
+            station_server = message.server
+            for channel in message.server.channels:
+                if channel.name == station_name:
+                    station_channel = channel
+            c.execute("SELECT * FROM stations WHERE server_discord_id = ? AND channel_discord_id = ?",
+                      (station_server.id, station_channel.id))
+            station_record = c.fetchone()
+            if not station_channel and not station_record:
                 await controller.send_message(message.channel, "That station does not exist.")
-            else:
+            elif not station_channel and station_record:
+                await controller.send_message(message.channel, "That station does not exist on the server, but its details are stored in my database. Recreating it...")
+                station_channel = await controller.create_channel(message.server, station_name, type=discord.ChannelType.voice)
+            elif station_channel and not station_record:
+                await controller.send_message(message.channel, "That channel is not registered as a station.")
+
+            if station_channel and station_record:
                 await controller.send_message(message.channel, "Starting station...")
-                voice_client = None
-                voice_channel = None
-                for channel in message.server.channels:
-                    if channel.name == station_name:
-                        voice_channel = channel
-                if not voice_channel:
-                    await controller.send_message(message.channel, "That station does not exist on the server, but its details are stored in my database. Recreating it...")
-                    voice_channel = await controller.create_channel(message.server, station_name, type=discord.ChannelType.voice)
                 station_bot = None
                 for bot in station_bots:
                     bot_client = bot.get_bot_client()
                     if not bot_client.is_voice_connected(message.server):
                         station_bot = bot
-                        voice_client = await bot_client.join_voice_channel(voice_channel)
-                        bot.set_channel(voice_channel)
+                        voice_client = await bot_client.join_voice_channel(station_channel)
+                        #await controller.change_nickname(bot_clien, station_name + "DJ")
+                        bot.set_channel(station_channel)
                         bot.set_voice_client(voice_client)
                         break
-                if not station_bot.get_voice_client():
+                if station_bot is None:
                     await controller.send_message(message.channel, "All stations are active.")
                 else:
-                    song_ids = station[2]
-                    songs = parse_raw_song_ids(song_ids)
+                    raw_song_ids = station_record[3]
+                    songs = parse_raw_song_ids(raw_song_ids)
                     for song in songs:
-                        player = await voice_client.create_ytdl_player(song[2])
+                        player = await station_bot.get_voice_client().create_ytdl_player(song[2])
                         print("Now playing \"{}\"".format(song[3]))
-                        station_bot.set_song_name(song[3])
+                        station_bot.set_song(Song(song[3], song[4]))
                         player.start()
                         while player.is_playing():
                             await asyncio.sleep(1)
@@ -294,13 +322,15 @@ async def on_message(message):
 
     if args[0] == "!song":
         if len(args) == 2:
-            song_name = None
+            song = None
             station_name = args[1]
             for bot in station_bots:
-                if bot.station_name == station_name:
-                    song_name = bot.get_song_name()
-            if song_name is not None:
-                await controller.send_message(message.channel, song_name)
+                channel = bot.get_channel()
+                if channel is not None and channel.name == station_name:
+                    song = bot.get_song()
+            if song is not None:
+                msg = "Title: " + song.get_title() + "\nUploaded by: " + song.get_uploader()
+                await controller.send_message(message.channel, msg)
             else:
                 await controller.send_message(message.channel, "No song is currently playing.")
 
@@ -309,8 +339,9 @@ async def on_message(message):
     #         current_player.stop()
     #     if message.author.voice.voice_channel in list
 
-def parse_raw_song_ids(song_ids):
+def parse_raw_song_ids(raw_song_ids):
     songs = []
+    song_ids = raw_song_ids.split(",")
     for char in song_ids:
         try:
             int(char)
@@ -328,43 +359,30 @@ async def on_ready():
         c.execute("SELECT * FROM users WHERE discord_id = ?", (member.id,))
         if not c.fetchone():
             c.execute("INSERT INTO users(discord_id) VALUES(?)", (member.id,))
-    c.execute("SELECT * FROM users")
-    for user in c.fetchall():
-        c.execute("SELECT * FROM scores WHERE user_id = ?", (user[0],))
-        if not c.fetchone():
-            c.execute("INSERT INTO scores(user_id) VALUES(?)", (user[0],))
     conn.commit()
-    await ticker()
+
+    controller.edit_profile(username="MyRadio")
 
 @controller.event
-async def on_member_remove(member):
-    print(member.name, "has been removed.")
-
-@controller.event
-async def on_client_join(member):
-    await controller.send_message(list(channel for channel in controller.get_all_channels() if channel.name == "general"),
-                              "Welcome, {}!".format(member.mention))
-
-def on_kill():
-    conn.close()
-    quit(0)
+async def on_server_join(server):
+    pass
 
 conn = sqlite3.connect("ellis.db")
 c = conn.cursor()
-c.execute("CREATE TABLE IF NOT EXISTS users(user_id INTEGER PRIMARY KEY, discord_id TEXT);")
-c.execute("CREATE TABLE IF NOT EXISTS stations(station_id INTEGER PRIMARY KEY, server_discord_id TEXT, station_name TEXT, song_ids TEXT)")
-c.execute("CREATE TABLE IF NOT EXISTS songs(song_id INTEGER PRIMARY KEY, user_id INTEGER, url TEXT, song_title TEXT, song_artist TEXT)")
+c.execute("CREATE TABLE IF NOT EXISTS users(user_id INTEGER PRIMARY KEY, discord_id TEXT)")
+c.execute("CREATE TABLE IF NOT EXISTS stations(station_id INTEGER PRIMARY KEY, server_discord_id TEXT, channel_discord_id TEXT, song_ids TEXT)")
+c.execute("CREATE TABLE IF NOT EXISTS songs(song_id INTEGER PRIMARY KEY, user_id INTEGER, url TEXT, song_title TEXT, song_uploader TEXT)")
 conn.commit()
 print("Starting...")
 
 loop = asyncio.get_event_loop()
 
 async def login():
-    i = 0
-    for e in entries:
+    n = 0
+    for i, e in enumerate(entries):
         await e.client.login(tokens[i])
-        i += 1
-    print(i, "clients logged in.")
+        n += 1
+    print(n, "clients logged in.")
 
 async def wrapped_connect(entry):
     try:
