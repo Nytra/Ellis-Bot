@@ -6,13 +6,23 @@ import random
 import sqlite3
 from collections import namedtuple
 
+# 4 clients
+# across many servers
+# with many members
+# with many channels
+# many stations
+# many songs
+
+# client.servers
+# for server -> server.me returns member instance
+
 with open("token.txt", "r") as f:
     tokens = list(line.strip() for line in f.readlines())
     f.close()
 
 class StationBot:
-    def __init__(self, bot_client):
-        self.bot_client = bot_client
+    def __init__(self, client):
+        self.client = client
         self.song = None
         self.channel = None
 
@@ -28,14 +38,17 @@ class StationBot:
     def get_voice_client(self):
         return self.voice_client
 
-    def get_bot_client(self):
-        return self.bot_client
+    def get_client(self):
+        return self.client
 
     def set_song(self, song):
         self.song = song
 
     def get_song(self):
         return self.song
+
+    def get_member(self):
+        return self.channel.server.me
 
 
 class Song:
@@ -60,6 +73,7 @@ class Station:
 
 repo = "https://github.com/Nytra/Ellis-Bot"
 help_msg = "Not done yet."
+app_name = "MyRadio"
 
 debug = False
 start_time = int(time.time())
@@ -169,7 +183,7 @@ async def on_message(message):
                                                or channel.type == discord.ChannelType.voice)))
             await controller.send_message(message.channel, msg)
 
-    if args[0] == "!create_station":
+    if args[0] == "!create":
         if len(args) == 2:
             station_name = args[1]
             c.execute("SELECT * FROM stations WHERE server_discord_id = ?", (message.server.id,))
@@ -227,7 +241,7 @@ async def on_message(message):
                             msg = "Title: {}\nUploader: {}\nAdded by: {}\nURL: {}\n\n".format(song_title, song_uploader, user_name, song_url)
                         await controller.send_message(message.channel, msg)
 
-    if args[0] == "!add_song":
+    if args[0] == "!add":
         if len(args) == 3:
             station_name = args[1]
             station_channel = None
@@ -275,7 +289,7 @@ async def on_message(message):
                     conn.commit()
                     await controller.send_message(message.channel, "The song has been added to the playlist.".format(station_name))
 
-    if args[0] == "!start_station":
+    if args[0] == "!start":
         if len(args) == 2:
             station_name = args[1]
             station_channel = None
@@ -283,9 +297,12 @@ async def on_message(message):
             for channel in message.server.channels:
                 if channel.name == station_name:
                     station_channel = channel
-            c.execute("SELECT * FROM stations WHERE server_discord_id = ? AND channel_discord_id = ?",
+            if station_channel:
+                c.execute("SELECT * FROM stations WHERE server_discord_id = ? AND channel_discord_id = ?",
                       (station_server.id, station_channel.id))
-            station_record = c.fetchone()
+                station_record = c.fetchone()
+            else:
+                station_record = None
             if not station_channel and not station_record:
                 await controller.send_message(message.channel, "That station does not exist.")
             elif not station_channel and station_record:
@@ -295,14 +312,21 @@ async def on_message(message):
                 await controller.send_message(message.channel, "That channel is not registered as a station.")
 
             if station_channel and station_record:
-                await controller.send_message(message.channel, "Starting station...")
+                #await controller.send_message(message.channel, "Starting station...")
                 station_bot = None
+
+                # check if any station bots are already active in the channel
                 for bot in station_bots:
-                    bot_client = bot.get_bot_client()
+                    if bot.get_client().is_voice_connected(station_server) and bot.get_voice_client().channel == station_channel:
+                        await controller.send_message(message.channel, "That station is already active.")
+                        return
+                for bot in station_bots:
+                    bot_client = bot.get_client()
                     if not bot_client.is_voice_connected(message.server):
                         station_bot = bot
                         voice_client = await bot_client.join_voice_channel(station_channel)
-                        #await controller.change_nickname(bot_clien, station_name + "DJ")
+                        station_member = station_server.me
+                        #await controller.change_nickname(station_member, "MyRadio DJ")
                         bot.set_channel(station_channel)
                         bot.set_voice_client(voice_client)
                         break
@@ -319,6 +343,7 @@ async def on_message(message):
                         while player.is_playing():
                             await asyncio.sleep(1)
                         player.stop()
+                    station_bot.get_voice_client().disconnect()
 
     if args[0] == "!song":
         if len(args) == 2:
@@ -333,6 +358,12 @@ async def on_message(message):
                 await controller.send_message(message.channel, msg)
             else:
                 await controller.send_message(message.channel, "No song is currently playing.")
+        else:
+            for bot in station_bots:
+                channel = bot.get_channel()
+                if message.author.voice.voice_channel is not None and channel is not None and channel.name == message.author.voice.voice_channel.name:
+                    await controller.send_message(message.channel, "Title: " + bot.get_song().get_title() +
+                                                  "\nUploaded by: " + bot.get_song().get_uploader())
 
     # if args[0] == "!skip":
     #     if controller.is_voice_connected(message.server) and current_player is not None:
@@ -342,14 +373,10 @@ async def on_message(message):
 def parse_raw_song_ids(raw_song_ids):
     songs = []
     song_ids = raw_song_ids.split(",")
-    for char in song_ids:
-        try:
-            int(char)
-            c.execute("SELECT * FROM songs WHERE song_id = ?", (char,))
-            song = c.fetchone()
-            songs.append(song)
-        except:
-            pass
+    for id in song_ids:
+        c.execute("SELECT * FROM songs WHERE song_id = ?", (id,))
+        song = c.fetchone()
+        songs.append(song)
     return songs
 
 @controller.event
@@ -364,8 +391,14 @@ async def on_ready():
     controller.edit_profile(username="MyRadio")
 
 @controller.event
+async def on_member_join(member):
+    for user in list(entry.client.user for entry in entries[1:]):
+        if member.id == user.id:
+            await controller.change_nickname(member, "MyRadio DJ")
+
+@controller.event
 async def on_server_join(server):
-    pass
+    controller.change_nickname(server.me, "MyRadio Controller")
 
 conn = sqlite3.connect("ellis.db")
 c = conn.cursor()
